@@ -1,0 +1,9 @@
+{
+	"name": "medallion-practice-adf",
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "e8d63ade-90b4-4686-b70a-e7298638af9c",
+		"tenantId": "2a69c91d-e849-4e34-a230-cdf8b27e1964"
+	}
+}

@@ -1,0 +1,7 @@
+{
+	"name": "IR-Products",
+	"properties": {
+		"type": "SelfHosted",
+		"description": "Creating self hosted run time for extracting products"
+	}
+}

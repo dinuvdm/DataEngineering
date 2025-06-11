@@ -1,0 +1,16 @@
+{
+	"name": "ds_raw_epd",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "LS_Http_EPDS",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "RestResource",
+		"typeProperties": {
+			"relativeUrl": "api/epds"
+		},
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}
