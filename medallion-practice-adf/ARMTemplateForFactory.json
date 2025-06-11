@@ -322,6 +322,33 @@
 							},
 							"traceLevel": "Coarse"
 						}
+					},
+					{
+						"name": "Transformed Epd",
+						"type": "DatabricksNotebook",
+						"dependsOn": [
+							{
+								"activity": "epd",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"notebookPath": "/Medallion Workspace/epddata"
+						},
+						"linkedServiceName": {
+							"referenceName": "DatabricksMedallion",
+							"type": "LinkedServiceReference"
+						}
 					}
 				],
 				"policy": {
@@ -333,7 +360,8 @@
 			"dependsOn": [
 				"[concat(variables('factoryId'), '/datasets/ds_raw_epd')]",
 				"[concat(variables('factoryId'), '/datasets/ds_raw_bronze_epd')]",
-				"[concat(variables('factoryId'), '/dataflows/df_epd_rw_silver')]"
+				"[concat(variables('factoryId'), '/dataflows/df_epd_rw_silver')]",
+				"[concat(variables('factoryId'), '/linkedServices/DatabricksMedallion')]"
 			]
 		},
 		{
@@ -446,8 +474,6 @@
 				"typeProperties": {
 					"location": {
 						"type": "AzureBlobFSLocation",
-						"fileName": "epd-cleansed",
-						"folderPath": "epd-data",
 						"fileSystem": "silver"
 					},
 					"compressionCodec": "snappy"
@@ -1135,11 +1161,15 @@
 						"select1 sink(allowSchemaDrift: true,",
 						"     validateSchema: false,",
 						"     format: 'parquet',",
+						"     partitionFileNames:[(concat('clean_epds_', toString(currentUTC(), 'yyyy-MM-dd'), '.csv')\r",
+						")],",
 						"     umask: 0022,",
 						"     preCommands: [],",
 						"     postCommands: [],",
 						"     skipDuplicateMapInputs: true,",
-						"     skipDuplicateMapOutputs: true) ~> sink1"
+						"     skipDuplicateMapOutputs: true,",
+						"     saveOrder: 1,",
+						"     partitionBy('hash', 1)) ~> sink1"
 					]
 				}
 			},
