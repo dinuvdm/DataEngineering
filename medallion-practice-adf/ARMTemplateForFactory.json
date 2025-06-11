@@ -1,0 +1,1153 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name",
+			"defaultValue": "medallion-practice-adf"
+		},
+		"AzureDataLakeStorage1_accountKey": {
+			"type": "secureString",
+			"metadata": "Secure string for 'accountKey' of 'AzureDataLakeStorage1'"
+		},
+		"AzureSqlDatabase1_password": {
+			"type": "secureString",
+			"metadata": "Secure string for 'password' of 'AzureSqlDatabase1'"
+		},
+		"DatabricksMedallion_accessToken": {
+			"type": "secureString",
+			"metadata": "Secure string for 'accessToken' of 'DatabricksMedallion'"
+		},
+		"LS_BlobStorage_connectionString": {
+			"type": "secureString",
+			"metadata": "Secure string for 'connectionString' of 'LS_BlobStorage'"
+		},
+		"AzureDataLakeStorage1_properties_typeProperties_url": {
+			"type": "string",
+			"defaultValue": "https://medalliondata.dfs.core.windows.net/"
+		},
+		"AzureSqlDatabase1_properties_typeProperties_server": {
+			"type": "string",
+			"defaultValue": "medallion-project.database.windows.net"
+		},
+		"AzureSqlDatabase1_properties_typeProperties_database": {
+			"type": "string",
+			"defaultValue": "medallion-project"
+		},
+		"AzureSqlDatabase1_properties_typeProperties_userName": {
+			"type": "string",
+			"defaultValue": "serveradmin"
+		},
+		"DatabricksMedallion_properties_typeProperties_existingClusterId": {
+			"type": "string",
+			"defaultValue": "0522-061139-n1r2zlvb"
+		},
+		"LS_Http_EPDS_properties_typeProperties_url": {
+			"type": "string",
+			"defaultValue": "https://buildingtransparency.org/"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/pipeline1')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Fetch All Tables",
+						"type": "Lookup",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderQuery": "SELECT * FROM [medallion-project].information_schema.tables\nWHERE table_schema = 'SalesLT'\nand table_type = 'BASE TABLE'",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "TablesQuery",
+								"type": "DatasetReference",
+								"parameters": {}
+							},
+							"firstRowOnly": false
+						}
+					},
+					{
+						"name": "ForEach1",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "Fetch All Tables",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('Fetch All Tables').output.value",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "Copy data1",
+									"type": "Copy",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"source": {
+											"type": "AzureSqlSource",
+											"queryTimeout": "02:00:00",
+											"partitionOption": "None"
+										},
+										"sink": {
+											"type": "ParquetSink",
+											"storeSettings": {
+												"type": "AzureBlobFSWriteSettings"
+											},
+											"formatSettings": {
+												"type": "ParquetWriteSettings"
+											}
+										},
+										"enableStaging": false,
+										"translator": {
+											"type": "TabularTranslator",
+											"typeConversion": true,
+											"typeConversionSettings": {
+												"allowDataTruncation": true,
+												"treatBooleanAsNumber": false
+											}
+										}
+									},
+									"inputs": [
+										{
+											"referenceName": "SqlTable",
+											"type": "DatasetReference",
+											"parameters": {
+												"SchemaName": {
+													"value": "@item().table_schema",
+													"type": "Expression"
+												},
+												"TableName": {
+													"value": "@item().table_name",
+													"type": "Expression"
+												}
+											}
+										}
+									],
+									"outputs": [
+										{
+											"referenceName": "ParquetFileOutput",
+											"type": "DatasetReference",
+											"parameters": {
+												"FolderName": {
+													"value": "@formatDateTime(utcNow(), 'yyyyMMdd')",
+													"type": "Expression"
+												},
+												"FileName": {
+													"value": "@concat(item().table_schema, '.' , item().table_name, '.parquet')",
+													"type": "Expression"
+												}
+											}
+										}
+									]
+								},
+								{
+									"name": "Notebook1",
+									"type": "DatabricksNotebook",
+									"dependsOn": [
+										{
+											"activity": "Copy data1",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"notebookPath": "/Medallion Workspace/BaseNotebook",
+										"baseParameters": {
+											"table_schema": {
+												"value": "@item().table_schema",
+												"type": "Expression"
+											},
+											"table_name": {
+												"value": "@item().table_name",
+												"type": "Expression"
+											},
+											"fileName": {
+												"value": "@formatDateTime(utcNow(), 'yyyyMMdd')",
+												"type": "Expression"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "DatabricksMedallion",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"annotations": [],
+				"lastPublishTime": "2025-05-22T08:35:40Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/TablesQuery')]",
+				"[concat(variables('factoryId'), '/datasets/SqlTable')]",
+				"[concat(variables('factoryId'), '/datasets/ParquetFileOutput')]",
+				"[concat(variables('factoryId'), '/linkedServices/DatabricksMedallion')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pl_epdproduct')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Copy data1",
+						"type": "Copy",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "RestSource",
+								"httpRequestTimeout": "00:01:40",
+								"requestInterval": "00.00:00:00.010",
+								"requestMethod": "GET",
+								"paginationRules": {
+									"supportRFC5988": "true"
+								}
+							},
+							"sink": {
+								"type": "JsonSink",
+								"storeSettings": {
+									"type": "AzureBlobFSWriteSettings",
+									"copyBehavior": "FlattenHierarchy"
+								},
+								"formatSettings": {
+									"type": "JsonWriteSettings"
+								}
+							},
+							"enableStaging": false
+						},
+						"inputs": [
+							{
+								"referenceName": "ds_raw_epd",
+								"type": "DatasetReference",
+								"parameters": {}
+							}
+						],
+						"outputs": [
+							{
+								"referenceName": "ds_raw_bronze_epd",
+								"type": "DatasetReference",
+								"parameters": {}
+							}
+						]
+					},
+					{
+						"name": "epd",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "Copy data1",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "df_epd_rw_silver",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"source1": {},
+									"sink1": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Coarse"
+						}
+					}
+				],
+				"policy": {
+					"elapsedTimeMetric": {}
+				},
+				"annotations": [],
+				"lastPublishTime": "2025-06-02T07:05:30Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/ds_raw_epd')]",
+				"[concat(variables('factoryId'), '/datasets/ds_raw_bronze_epd')]",
+				"[concat(variables('factoryId'), '/dataflows/df_epd_rw_silver')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ParquetFileOutput')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureDataLakeStorage1",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"FolderName": {
+						"type": "string"
+					},
+					"FileName": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "Parquet",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobFSLocation",
+						"fileName": {
+							"value": "@dataset().FileName",
+							"type": "Expression"
+						},
+						"folderPath": {
+							"value": "@dataset().FolderName",
+							"type": "Expression"
+						},
+						"fileSystem": "bronze"
+					},
+					"compressionCodec": "snappy"
+				},
+				"schema": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureDataLakeStorage1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/SqlTable')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureSqlDatabase1",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"SchemaName": {
+						"type": "string"
+					},
+					"TableName": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "AzureSqlTable",
+				"schema": [],
+				"typeProperties": {
+					"schema": {
+						"value": "@dataset().SchemaName",
+						"type": "Expression"
+					},
+					"table": {
+						"value": "@dataset().TableName",
+						"type": "Expression"
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlDatabase1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/TablesQuery')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureSqlDatabase1",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "AzureSqlTable",
+				"schema": [],
+				"typeProperties": {
+					"schema": "SalesLT",
+					"table": "Address"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureSqlDatabase1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ds_cleaned')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureDataLakeStorage1",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "Parquet",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobFSLocation",
+						"fileName": "epd-cleansed",
+						"folderPath": "epd-data",
+						"fileSystem": "silver"
+					},
+					"compressionCodec": "snappy"
+				},
+				"schema": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureDataLakeStorage1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ds_raw_bronze_epd')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureDataLakeStorage1",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "Json",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobFSLocation",
+						"fileName": "epd_raw",
+						"fileSystem": "bronze"
+					}
+				},
+				"schema": {}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureDataLakeStorage1')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ds_raw_epd')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "LS_Http_EPDS",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "RestResource",
+				"typeProperties": {
+					"relativeUrl": "api/epds"
+				},
+				"schema": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/LS_Http_EPDS')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/AzureDataLakeStorage1')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureBlobFS",
+				"typeProperties": {
+					"url": "[parameters('AzureDataLakeStorage1_properties_typeProperties_url')]",
+					"accountKey": {
+						"type": "SecureString",
+						"value": "[parameters('AzureDataLakeStorage1_accountKey')]"
+					}
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/AzureSqlDatabase1')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureSqlDatabase",
+				"typeProperties": {
+					"server": "[parameters('AzureSqlDatabase1_properties_typeProperties_server')]",
+					"database": "[parameters('AzureSqlDatabase1_properties_typeProperties_database')]",
+					"encrypt": "mandatory",
+					"trustServerCertificate": false,
+					"authenticationType": "SQL",
+					"userName": "[parameters('AzureSqlDatabase1_properties_typeProperties_userName')]",
+					"password": {
+						"type": "SecureString",
+						"value": "[parameters('AzureSqlDatabase1_password')]"
+					}
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/DatabricksMedallion')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureDatabricks",
+				"typeProperties": {
+					"domain": "https://adb-1549451036658791.11.azuredatabricks.net",
+					"accessToken": {
+						"type": "SecureString",
+						"value": "[parameters('DatabricksMedallion_accessToken')]"
+					},
+					"existingClusterId": "[parameters('DatabricksMedallion_properties_typeProperties_existingClusterId')]"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/LS_BlobStorage')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureBlobStorage",
+				"typeProperties": {
+					"connectionString": "[parameters('LS_BlobStorage_connectionString')]"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/LS_Http_EPDS')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "RestService",
+				"typeProperties": {
+					"url": "[parameters('LS_Http_EPDS_properties_typeProperties_url')]",
+					"enableServerCertificateValidation": true,
+					"authenticationType": "Anonymous"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/IR-Products')]",
+			"type": "Microsoft.DataFactory/factories/integrationRuntimes",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "SelfHosted",
+				"description": "Creating self hosted run time for extracting products",
+				"typeProperties": {}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/df_epd_rw_silver')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "ds_raw_bronze_epd",
+								"type": "DatasetReference"
+							},
+							"name": "source1"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "ds_cleaned",
+								"type": "DatasetReference"
+							},
+							"name": "sink1",
+							"rejectedDataLinkedService": {
+								"referenceName": "AzureDataLakeStorage1",
+								"type": "LinkedServiceReference"
+							}
+						}
+					],
+					"transformations": [
+						{
+							"name": "select1"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          aac_thermal_conductivity as string,",
+						"          aac_white as string,",
+						"          abuse_resistant as string,",
+						"          access_flooring_adjustable_height as string,",
+						"          access_flooring_concentrated_load as string,",
+						"          access_flooring_core_material as string,",
+						"          access_flooring_drylay as string,",
+						"          access_flooring_finish_material as string,",
+						"          access_flooring_finished_floor_height as string,",
+						"          access_flooring_fixed_height as string,",
+						"          access_flooring_magnetically_attached_finish as string,",
+						"          access_flooring_panel_thickness as string,",
+						"          access_flooring_permanent_finish as string,",
+						"          access_flooring_rolling_load_10000_pass as string,",
+						"          access_flooring_rolling_load_10_pass as string,",
+						"          access_flooring_seismic_rating as string,",
+						"          access_flooring_stringers as string,",
+						"          access_flooring_uniform_load as string,",
+						"          aci_exposure_classes as string[],",
+						"          acid_etched as boolean,",
+						"          admixture_effects as string,",
+						"          aggregate_gradation as string,",
+						"          aggregate_nominal_max_size as string,",
+						"          aggregate_weight_classification as string,",
+						"          ahu_airflow_control as string,",
+						"          ahu_zone_control as string,",
+						"          air_filters_media_type as string,",
+						"          air_filters_merv_rating as string,",
+						"          air_infiltration as string,",
+						"          air_volume as string,",
+						"          airflow_rate as string,",
+						"          alloy as string,",
+						"          also_shown_in as string[],",
+						"          alt_names as string,",
+						"          amperage as string,",
+						"          anodized as string,",
+						"          applicable_in as short[],",
+						"          application_rate as string,",
+						"          are_impacts_locked as boolean,",
+						"          armored as string,",
+						"          asphalt as string,",
+						"          asphalt_aggregate_size_max as string,",
+						"          asphalt_gradation as string,",
+						"          asphalt_ground_tire_rubber as string,",
+						"          asphalt_gtr as string,",
+						"          asphalt_max_temperature as string,",
+						"          asphalt_min_temperature as string,",
+						"          asphalt_mix_type as string,",
+						"          asphalt_pmb as string,",
+						"          asphalt_ppa as string,",
+						"          asphalt_rap as string,",
+						"          asphalt_ras as string,",
+						"          asphalt_sbr as string,",
+						"          asphalt_sbs as string,",
+						"          assembly_u_factor as string,",
+						"          astm_standards as string,",
+						"          astm_type as string,",
+						"          attachments as (ClimateEarth as string, {ILCD / NorgeEpd} as string, {Spider / NorgeEpd} as string, TransparencyCatalogURL as string),",
+						"          best_practice as string,",
+						"          biogenic_embodied_carbon as string,",
+						"          biogenic_embodied_carbon_z as double,",
+						"          bleachable as string,",
+						"          boilers_configuration as string,",
+						"          boilers_equipment_fuel_type as string,",
+						"          box_id as long,",
+						"          brick_building as string,",
+						"          brick_chemical_resistant as string,",
+						"          brick_facing as string,",
+						"          brick_floor as string,",
+						"          brick_glazed as string,",
+						"          brick_other as string,",
+						"          brick_paving as string,",
+						"          brick_pedestrian as string,",
+						"          brick_tiles as string,",
+						"          buried_piping_type as string,",
+						"          c1157 as string,",
+						"          cable_trays_material as string,",
+						"          cabling_category as string,",
+						"          category as (allows_any_declared_unit as boolean, beta_only as boolean, category_statistics_warning as boolean, created_on as string, declared_unit as string, default_distance as string, default_transport_mode as string, description as string, display_name as string, draft as boolean, facility_type as string, generic_material as boolean, hide_service_life as boolean, id as string, includes_b1_stage as boolean, lcia_uncertainty as double, mass_per_declared_unit as string, massless as boolean, masterformat as string, may_contain_trusted_vendor_declarations as boolean, name as string, no_statistics as boolean, obsolete as boolean, openepd as string, openepd_name as string, parents as string[], pct10_gwp as string, pct20_gwp as string, pct30_gwp as string, pct40_gwp as string, pct50_gwp as string, pct60_gwp as string, pct70_gwp as string, pct80_gwp as string, pct90_gwp as string, requires_mass_per_declared_unit as boolean, short_name as string, short_service_life_disclaimer as boolean, subcategories as string[], template_builders as string[], unspsc as integer, updated_on as string, use_stored_carbon as string),",
+						"          cdf as string,",
+						"          ceiling_panel_cac as string,",
+						"          ceiling_panel_core_material as string,",
+						"          ceiling_panel_nrc as string,",
+						"          cement_board_thickness as string,",
+						"          cement_scm as string,",
+						"          cementitious as (CaCO3 as string, fly_ash as double, gg45 as string, ggbs as double, mk as string, nat_poz as string, opc as string, other as string, si_fume as string, wht as string),",
+						"          cladding as string,",
+						"          cladding_facing_material as string,",
+						"          cladding_insulating_material as string,",
+						"          cladding_r_value as string,",
+						"          cmu_block_type as string,",
+						"          cmu_insulated as string,",
+						"          cmu_sound_performance as string,",
+						"          cmu_weight_classification as string,",
+						"          cog_u_factor as string,",
+						"          cold_finished as string,",
+						"          color_rendering_index as string,",
+						"          color_temperature as string,",
+						"          compressive_strength as string,",
+						"          concrete as string,",
+						"          concrete_aggregate_size_max as string,",
+						"          concrete_air_entrain as boolean,",
+						"          concrete_co2_entrain as boolean,",
+						"          concrete_compressive_strength_28d as string,",
+						"          concrete_compressive_strength_other as string,",
+						"          concrete_compressive_strength_other_d as short,",
+						"          concrete_flexion_strength as string,",
+						"          concrete_max_slump as string,",
+						"          concrete_min_pipeline_size as string,",
+						"          concrete_min_slump as string,",
+						"          concrete_self_consolidating as boolean,",
+						"          concrete_slump as string,",
+						"          concrete_w_c_ratio as double,",
+						"          conductive_flooring as string,",
+						"          conduit_inner_diameter as string,",
+						"          conduit_material as string,",
+						"          conduit_nominal_diameter as string,",
+						"          conduit_outer_diameter as string,",
+						"          conduit_wall_thickness as string,",
+						"          confirmable_fields as string[],",
+						"          confirmed_fields as string[],",
+						"          connectorized as string,",
+						"          conservative_estimate as string,",
+						"          cooling_capacity as string,",
+						"          copy_of as string,",
+						"          corrections_count as boolean,",
+						"          countertop_material as string,",
+						"          cqd_sync_id as string,",
+						"          cqd_sync_server_from as string,",
+						"          cqd_sync_server_original as string,",
+						"          cqd_sync_unlocked as boolean,",
+						"          cqd_sync_updated_on as string,",
+						"          created_on as string,",
+						"          csa_a3001 as string,",
+						"          csa_exposure_classes as string[],",
+						"          cushioned as string,",
+						"          date_of_issue as date,",
+						"          date_validity_ends as date,",
+						"          decay_resistant as string,",
+						"          decking_board_material as string,",
+						"          declaration_type as string,",
+						"          declared_unit as string,",
+						"          density as string,",
+						"          depth as string,",
+						"          description as string,",
+						"          developer as (email as string, name as string, org as (address as string, address_line as string, admin_district as string, admin_district2 as string, alt_names as string[], attachments as ({Programme Instructions} as string), confirmable_fields as string[], confirmed_fields as string[], core_pcrs as string, country as string, cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, currency as string, email as string, email_extensions as string[], enterprise as boolean, errors as string, failures as string, general_program_instructions as string, gwp_contact as string, horizontal_logo as string, id as string, image as string, invalid_after as string, is_failed as boolean, iso14001_certified as string, iso9001_certified as string, jurisdiction as string, latitude as double, legal_name as string, locality as string, location as string, longitude as double, my_capabilities as string, name as string, org_type as string, original_ec3_link as string, owner as string, parent as string, parent_email_extensions as string, password_login_allowed as boolean, pilot_all_employees as boolean, po_geography as short[], postal_code as string, primary_activity_builder as boolean, primary_activity_design as boolean, primary_activity_digitization_qa as boolean, primary_activity_education as boolean, primary_activity_epd_developer as boolean, primary_activity_forest_practices_certification as boolean, primary_activity_general_contractor as boolean, primary_activity_industry_association as boolean, primary_activity_manufacturer as boolean, primary_activity_operator as boolean, primary_activity_other as boolean, primary_activity_owner as boolean, primary_activity_performance_standards_issuer as boolean, primary_activity_subcontractor as boolean, primary_activity_sustainability_consulting as boolean, primary_activity_verifier as boolean, primary_lcia_method as string, tax_id as string, updated_on as string, user_group_collaborators as string, user_group_employees as string, warnings as string, web_domain as string, website as string)),",
+						"          digitization_confirmed as string,",
+						"          digitization_confirmed_on as string,",
+						"          digitization_qa as string,",
+						"          digitization_qa_notes as string,",
+						"          dimmable as string,",
+						"          divided as string,",
+						"          doc as string,",
+						"          document_version as string,",
+						"          dp_rating as string,",
+						"          electrochromic as boolean,",
+						"          elevators_building_rise as string,",
+						"          elevators_rated_load as string,",
+						"          elevators_rated_speed as string,",
+						"          elevators_travel_length as string,",
+						"          elevators_usage_intensity as string,",
+						"          en197_1 as string,",
+						"          en_exposure_classes as string[],",
+						"          en_standards as string,",
+						"          energy_source as string,",
+						"          epd_degraded as boolean,",
+						"          epoxy_coated as string,",
+						"          errors as (concrete_compressive_strength_28d as string[], date_of_issue as string[], date_validity_ends as string[], excluded as string[]),",
+						"          excluded as boolean,",
+						"          externally_verified as boolean,",
+						"          fabrication as string,",
+						"          failures as (declared_unit as string[]),",
+						"          features as string,",
+						"          felt_backing as string,",
+						"          fiber_reinforced as string,",
+						"          file_name as string,",
+						"          fire_classified as string,",
+						"          fire_protection as boolean,",
+						"          fire_protection_piping_material as string,",
+						"          fire_radiant_panel_rating_astme648 as string,",
+						"          fire_rating as string,",
+						"          fire_resistant as boolean,",
+						"          fire_retardant as string,",
+						"          fire_smoke_density_rating_astme648 as string,",
+						"          flat_glass_panes_thickness as string,",
+						"          floor_box_cover as string,",
+						"          floor_box_cover_material as string,",
+						"          floor_box_floor_material as string,",
+						"          floor_box_material as string,",
+						"          floor_box_outlets as string,",
+						"          floor_score as string,",
+						"          flooring as string,",
+						"          flow_rate as string,",
+						"          fnd as string,",
+						"          foam_type as string,",
+						"          foil_backing as string,",
+						"          forest_practices_certifiers as string,",
+						"          form_factor as string,",
+						"          frame_material as string,",
+						"          galvanized as string,",
+						"          gfrc as string,",
+						"          glass_mosaic as string,",
+						"          glass_panes as short,",
+						"          glazing_intended_application_aw_windows as string,",
+						"          glazing_intended_application_curtain_wall as string,",
+						"          glazing_intended_application_cw_windows as string,",
+						"          glazing_intended_application_glazed_doors as string,",
+						"          glazing_intended_application_lc_windows as string,",
+						"          glazing_intended_application_other as string,",
+						"          glazing_intended_application_r_windows as string,",
+						"          glazing_intended_application_sloped_skylights as string,",
+						"          glazing_intended_application_storefronts as string,",
+						"          glazing_intended_application_unit_skylights as string,",
+						"          grt as string,",
+						"          gwp as string,",
+						"          gwp_per_category_declared_unit as string,",
+						"          gwp_per_kg as string,",
+						"          gwp_z as double,",
+						"          gypsum_facing as string,",
+						"          gypsum_fire_rating as string,",
+						"          gypsum_flame_spread_astm_e84 as string,",
+						"          gypsum_hard_body_impact_c1929 as string,",
+						"          gypsum_indentation_d5420 as string,",
+						"          gypsum_r_factor as string,",
+						"          gypsum_smoke_production_astm_e84 as string,",
+						"          gypsum_soft_body_impact_e695 as string,",
+						"          gypsum_specific_density as string,",
+						"          gypsum_surface_abrasion_d4977 as string,",
+						"          gypsum_thickness as string,",
+						"          hardware_function as string,",
+						"          heat_pumps_type as string,",
+						"          heating_capacity as string,",
+						"          height as string,",
+						"          hrz as string,",
+						"          hurricane_resistant as string,",
+						"          hvac_ducts_material as string,",
+						"          hvac_ducts_shape as string,",
+						"          hvac_ducts_type as string,",
+						"          hvac_heat_exchangers_type as string,",
+						"          id as string,",
+						"          image as string,",
+						"          image_small as string,",
+						"          includes as string[],",
+						"          indoor as string,",
+						"          industry_standards as string[],",
+						"          insulated as string,",
+						"          insulating_material as string,",
+						"          insulation_intended_application as string,",
+						"          intended_application as string,",
+						"          intumescent_fireproofing_material_type as string,",
+						"          is_downloadable as boolean,",
+						"          is_duplicate as boolean,",
+						"          is_failed as boolean,",
+						"          jacket_material as string,",
+						"          jurisdiction as short[],",
+						"          laminated as boolean,",
+						"          language as string,",
+						"          large_format as string,",
+						"          lca_discussion as string,",
+						"          length as string,",
+						"          lightweight as boolean,",
+						"          low_emissivity as boolean,",
+						"          lowest_plausible_gwp as string,",
+						"          luminosity as string,",
+						"          manufacture_type as string,",
+						"          manufactured as string,",
+						"          manufacturer as (address as string, address_line as string, admin_district as string, admin_district2 as string, alt_names as string[], attachments as (TransparencyCatalogURL as string), confirmable_fields as string[], confirmed_fields as string[], core_pcrs as string, country as string, cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, currency as string, email as string, email_extensions as string[], enterprise as boolean, errors as string, failures as string, general_program_instructions as string, gwp_contact as string, horizontal_logo as string, id as string, image as string, invalid_after as string, is_failed as boolean, iso14001_certified as string, iso9001_certified as string, jurisdiction as string, latitude as double, legal_name as string, locality as string, location as string, longitude as double, my_capabilities as string, name as string, org_type as string, original_ec3_link as string, owner as string, parent as string, parent_email_extensions as string, password_login_allowed as boolean, pilot_all_employees as boolean, po_geography as string, postal_code as integer, primary_activity_builder as boolean, primary_activity_design as boolean, primary_activity_digitization_qa as boolean, primary_activity_education as boolean, primary_activity_epd_developer as boolean, primary_activity_forest_practices_certification as boolean, primary_activity_general_contractor as boolean, primary_activity_industry_association as boolean, primary_activity_manufacturer as boolean, primary_activity_operator as boolean, primary_activity_other as boolean, primary_activity_owner as boolean, primary_activity_performance_standards_issuer as boolean, primary_activity_subcontractor as boolean, primary_activity_sustainability_consulting as boolean, primary_activity_verifier as boolean, primary_lcia_method as string, tax_id as string, updated_on as string, user_group_collaborators as string, user_group_employees as string, warnings as (address as string[]), web_domain as string, website as string),",
+						"          manufacturer_specific as boolean,",
+						"          manufacturing_description as string,",
+						"          manufacturing_image as string,",
+						"          manufacturing_image_crop_area as string,",
+						"          masonry_cement_astm_c91_type as string,",
+						"          mass_per_declared_unit as string,",
+						"          mass_per_unit_length as string,",
+						"          matched_plants_count as boolean,",
+						"          material_id as string,",
+						"          max_capacity as string,",
+						"          mechanical_installation as string,",
+						"          mechanical_refrigerants as string,",
+						"          membrane_roofing_reinforcement as string,",
+						"          miniature_mosaic as string,",
+						"          moisture_resistant as string,",
+						"          mold_resistant as string,",
+						"          mosaic_tile as string,",
+						"          multiproduct as boolean,",
+						"          my_capabilities as boolean,",
+						"          my_material_capabilities as string,",
+						"          nafs_performance_class_aw as string,",
+						"          nafs_performance_class_cw as string,",
+						"          nafs_performance_class_lc as string,",
+						"          nafs_performance_class_r as string,",
+						"          nafs_performance_grade as string,",
+						"          name as string,",
+						"          not_an_epd as boolean,",
+						"          nsf332 as string,",
+						"          nsf347 as string,",
+						"          oil as string,",
+						"          oil_well_cement as string,",
+						"          open_xpd_uuid as string,",
+						"          original_data_format as string,",
+						"          original_ec3_link as string,",
+						"          ota as string,",
+						"          other as string,",
+						"          outdoor as string,",
+						"          outlet_level_metering as string,",
+						"          outlet_level_switching as string,",
+						"          owner as (name as string, user_id as string),",
+						"          painted as string,",
+						"          pav as string,",
+						"          pcr as (allows_facility_specific_epds as boolean, alt_names as string[], attachments as (EnglishTranslation as string, URL as string), categories as string[], confirmable_fields as string[], confirmed_fields as string[], cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, date_of_issue as date, date_validity_ends as date, declared_units as string[], doc as string, errors as (date_of_issue as string[], declared_units as string[], version as string[]), failures as (date_of_issue as string[], declared_units as string[], version as string[]), id as string, is_failed as boolean, issuer as string, issuer_doc_id as string, lcia_requirements as ({EF 3.0} as (impacts as string[], jurisdiction as short[], order as boolean), {TRACI 2.1} as (impacts as string[], jurisdiction as short[], order as boolean)), my_capabilities as string, name as string, open_xpd_uuid as string, original_ec3_link as string, owner as string, parent as string, requires_mass as boolean, requires_uncertainty as boolean, short_link as string, short_name as string, status as string, updated_on as string, version as string, warnings as string),",
+						"          pcr_notes as string,",
+						"          pct80_gwp_per_category_declared_unit as string,",
+						"          pdu_outlets as string,",
+						"          pdu_technology as string,",
+						"          piping_ansi_schedule as string,",
+						"          piping_diameter as string,",
+						"          plant_geography as string[],",
+						"          plant_or_group as (address as string, address_line as string, admin_district as string, admin_district2 as string, alt_names as string[], attachments as string, carbon_intensity as string, categories as string[], confirmable_fields as string[], confirmed_fields as string[], country as string, cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, currency as string, distance as string, id as string, invalid_after as string, is_failed as boolean, jurisdiction as string[], latitude as double, locality as string, location as string, longitude as double, my_capabilities as string, name as string, notes as string, openepd_id as string, origin_code as string, owned_by as (address as string, address_line as string, admin_district as string, admin_district2 as string, alt_names as string[], attachments as (TransparencyCatalogURL as string), confirmable_fields as string[], confirmed_fields as string[], core_pcrs as string, country as string, cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, currency as string, email as string, email_extensions as string[], enterprise as boolean, errors as string, failures as string, general_program_instructions as string, gwp_contact as string, horizontal_logo as string, id as string, image as string, invalid_after as string, is_failed as boolean, iso14001_certified as string, iso9001_certified as string, jurisdiction as string, latitude as double, legal_name as string, locality as string, location as string, longitude as double, my_capabilities as string, name as string, org_type as string, original_ec3_link as string, owner as string, parent as string, parent_email_extensions as string, password_login_allowed as boolean, pilot_all_employees as boolean, po_geography as string, postal_code as integer, primary_activity_builder as boolean, primary_activity_design as boolean, primary_activity_digitization_qa as boolean, primary_activity_education as boolean, primary_activity_epd_developer as boolean, primary_activity_forest_practices_certification as boolean, primary_activity_general_contractor as boolean, primary_activity_industry_association as boolean, primary_activity_manufacturer as boolean, primary_activity_operator as boolean, primary_activity_other as boolean, primary_activity_owner as boolean, primary_activity_performance_standards_issuer as boolean, primary_activity_subcontractor as boolean, primary_activity_sustainability_consulting as boolean, primary_activity_verifier as boolean, primary_lcia_method as string, tax_id as string, updated_on as string, user_group_collaborators as string, user_group_employees as string, warnings as (address as string[]), web_domain as string, website as string), owner as string, plants_count as boolean, postal_code as string, total_epds as short, type as string, units as string, updated_on as string, warnings as string),",
+						"          plant_specific as boolean,",
+						"          plaster_composition as string,",
+						"          plc as boolean,",
+						"          plumbing_piping_material as string,",
+						"          poke_through as string,",
+						"          porcelain as string,",
+						"          post_consumer_recycled_content as string,",
+						"          precast_element_type_balcony as string,",
+						"          precast_element_type_beam as string,",
+						"          precast_element_type_box_culvert as string,",
+						"          precast_element_type_column as string,",
+						"          precast_element_type_hollowcore as string,",
+						"          precast_element_type_manhole as string,",
+						"          precast_element_type_pile as string,",
+						"          precast_element_type_rail_sleeper as string,",
+						"          precast_element_type_retaining_wall as string,",
+						"          precast_element_type_road_barriers as string,",
+						"          precast_element_type_solid_slab as string,",
+						"          precast_element_type_stairs as string,",
+						"          precast_element_type_wall as string,",
+						"          pressed_floor_tile as string,",
+						"          private as boolean,",
+						"          product_specific as boolean,",
+						"          product_usage_description as string,",
+						"          product_usage_image as string,",
+						"          product_usage_image_crop_area as string,",
+						"          program_operator as (address as string, address_line as string, admin_district as string, admin_district2 as string, alt_names as string[], attachments as ({General Programme Instructions} as string, {Programme Instructions} as string, TransparencyCatalogURL as string), confirmable_fields as string[], confirmed_fields as string[], core_pcrs as string, country as string, cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, currency as string, email as string, email_extensions as string[], enterprise as boolean, errors as string, failures as string, general_program_instructions as string, gwp_contact as string, horizontal_logo as string, id as string, image as string, invalid_after as string, is_failed as boolean, iso14001_certified as string, iso9001_certified as string, jurisdiction as string, latitude as double, legal_name as string, locality as string, location as string, longitude as double, my_capabilities as string, name as string, org_type as string, original_ec3_link as string, owner as string, parent as string, parent_email_extensions as string, password_login_allowed as boolean, pilot_all_employees as boolean, po_geography as string[], postal_code as short, primary_activity_builder as boolean, primary_activity_design as boolean, primary_activity_digitization_qa as boolean, primary_activity_education as boolean, primary_activity_epd_developer as boolean, primary_activity_forest_practices_certification as boolean, primary_activity_general_contractor as boolean, primary_activity_industry_association as boolean, primary_activity_manufacturer as boolean, primary_activity_operator as boolean, primary_activity_other as boolean, primary_activity_owner as boolean, primary_activity_performance_standards_issuer as boolean, primary_activity_subcontractor as boolean, primary_activity_sustainability_consulting as boolean, primary_activity_verifier as boolean, primary_lcia_method as string, tax_id as string, updated_on as string, user_group_collaborators as string, user_group_employees as string, warnings as string, web_domain as string, website as string),",
+						"          program_operator_fkey as string,",
+						"          pump_discharge_pressure as string,",
+						"          pump_horsepower as string,",
+						"          pyrolytic_coated as boolean,",
+						"          quarry as string,",
+						"          raceways_material as string,",
+						"          rack_type as string,",
+						"          raised as string,",
+						"          reach as string,",
+						"          recycled_aggregate as string,",
+						"          recycled_content as string,",
+						"          reference_service_life as string,",
+						"          regular as string,",
+						"          reinforced as string,",
+						"          requires_ocr as boolean,",
+						"          residential_only as string,",
+						"          resilient_flooring_delta_iic as string,",
+						"          resilient_flooring_form_factor as string,",
+						"          resilient_flooring_material as string,",
+						"          resilient_flooring_thickness as string,",
+						"          resilient_flooring_wear_layer as string,",
+						"          reviewer as string,",
+						"          rohs as string,",
+						"          roof_cover_boards_facing as string,",
+						"          roof_cover_boards_material as string,",
+						"          roof_cover_boards_thickness as string,",
+						"          sac as string,",
+						"          sae_standards as string,",
+						"          sanitizable as boolean,",
+						"          sheet_construction as string,",
+						"          shielded as string,",
+						"          short_link as string,",
+						"          sht as string,",
+						"          siding_form_factor as string,",
+						"          siding_insulated as string,",
+						"          siding_paint_or_stain_required as string,",
+						"          siding_r_value as string,",
+						"          siding_ventilated as string,",
+						"          sku as string,",
+						"          slag as string,",
+						"          sog as string,",
+						"          solar_heat_gain as double,",
+						"          spacer as string,",
+						"          specialty as string,",
+						"          specific_density as string,",
+						"          speed as string,",
+						"          sport_flooring as string,",
+						"          spray_fireproofing_density as string,",
+						"          spray_fireproofing_material_type as string,",
+						"          sputter_coat as boolean,",
+						"          sri as string,",
+						"          stainless as string,",
+						"          standard_deviation as string,",
+						"          static_load as string,",
+						"          steel_astm_marking as string,",
+						"          steel_bar_elongation as string,",
+						"          steel_composition as string,",
+						"          steel_euro_marking as string,",
+						"          steel_fabricated as string,",
+						"          steel_making_route_bof as string,",
+						"          steel_making_route_eaf as string,",
+						"          steel_making_route_ohf as string,",
+						"          steel_mass_percentage as string,",
+						"          steel_modulus_of_elasticity as string,",
+						"          steel_post_consumer_recycled_content as string,",
+						"          steel_rebar_bending_pin_max as string,",
+						"          steel_rebar_diameter_min as string,",
+						"          steel_rebar_grade as string,",
+						"          steel_rebar_ts_ys_ratio_max as string,",
+						"          steel_recycled_content as string,",
+						"          steel_thermal_conductivity as string,",
+						"          steel_thermal_expansion as string,",
+						"          steel_yield_tensile_str as string,",
+						"          step_width as string,",
+						"          stored_carbon as string,",
+						"          stored_carbon_z as double,",
+						"          supply_chain_specific as double,",
+						"          tempered as boolean,",
+						"          textiles_fabric_type as string,",
+						"          thermal_separation as string,",
+						"          thermally_improved as string,",
+						"          thickness as string,",
+						"          thickness_per_declared_unit as string,",
+						"          thin_ethernet as string,",
+						"          third_party_verification_url as string,",
+						"          third_party_verified as boolean,",
+						"          tile_panels as string,",
+						"          tile_pavers as string,",
+						"          tiling_post_consumer_recycled_content as string,",
+						"          tiling_total_recycled_content as string,",
+						"          timber_species as string,",
+						"          total_racking_units as string,",
+						"          total_recycled_content as string,",
+						"          toughened as boolean,",
+						"          typical_utilization as string,",
+						"          unbound as string,",
+						"          uncertainty_adjusted_gwp as string,",
+						"          uncertainty_factor as double,",
+						"          updated_on as string,",
+						"          use_stored_carbon as boolean,",
+						"          utility_piping_material as string,",
+						"          vantage_vinyl as string,",
+						"          ventilated as string,",
+						"          verifier as (email as string, name as string, org as (address as string, address_line as string, admin_district as string, admin_district2 as string, alt_names as string[], attachments as string, confirmable_fields as string[], confirmed_fields as string[], core_pcrs as string, country as string, cqd_sync_id as string, cqd_sync_server_from as string, cqd_sync_server_original as string, cqd_sync_unlocked as boolean, cqd_sync_updated_on as string, created_on as string, currency as string, email as string, email_extensions as string[], enterprise as boolean, errors as string, failures as string, general_program_instructions as string, gwp_contact as string, horizontal_logo as string, id as string, image as string, invalid_after as date, is_failed as boolean, iso14001_certified as string, iso9001_certified as string, jurisdiction as string, latitude as double, legal_name as string, locality as string, location as string, longitude as double, my_capabilities as string, name as string, org_type as string, original_ec3_link as string, owner as string, parent as string, parent_email_extensions as string, password_login_allowed as boolean, pilot_all_employees as boolean, po_geography as string[], postal_code as string, primary_activity_builder as boolean, primary_activity_design as boolean, primary_activity_digitization_qa as boolean, primary_activity_education as boolean, primary_activity_epd_developer as boolean, primary_activity_forest_practices_certification as boolean, primary_activity_general_contractor as boolean, primary_activity_industry_association as boolean, primary_activity_manufacturer as boolean, primary_activity_operator as boolean, primary_activity_other as boolean, primary_activity_owner as boolean, primary_activity_performance_standards_issuer as boolean, primary_activity_subcontractor as boolean, primary_activity_sustainability_consulting as boolean, primary_activity_verifier as boolean, primary_lcia_method as string, tax_id as string, updated_on as string, user_group_collaborators as string, user_group_employees as string, warnings as string, web_domain as string, website as string)),",
+						"          vertical_rise as string,",
+						"          vinyl_siding_thickness as string,",
+						"          voc_emissions as string,",
+						"          vrt_column as string,",
+						"          vrt_other as string,",
+						"          vrt_wall as string,",
+						"          wall_base_material as string,",
+						"          wall_finish as string,",
+						"          wall_tile as string,",
+						"          warnings as (concrete_aggregate_size_max as string[], concrete_cement_content as string[], concrete_max_slump as string[], concrete_min_pipeline_size as string[], concrete_min_slump as string[], concrete_slump as string[], concrete_w_c_ratio as string[], density as string[], developer as string[], developer_org as string[], impacts as string[], language as string[], pcr as string[], verifier as string[]),",
+						"          wattage as string,",
+						"          weather_exposed as string,",
+						"          white_cement as boolean,",
+						"          width as string,",
+						"          wood_board_thickness as string,",
+						"          yarn_type as string,",
+						"          yarn_weight as string,",
+						"          zwtl as string",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     limit: 100,",
+						"     ignoreNoFilesFound: false,",
+						"     documentForm: 'documentPerLine') ~> source1",
+						"source1 select(mapColumn(",
+						"          id,",
+						"          best_practice,",
+						"          conservative_estimate,",
+						"          date_of_issue,",
+						"          declared_unit,",
+						"          gwp,",
+						"          gwp_per_category_declared_unit,",
+						"          gwp_per_kg,",
+						"          gwp_z,",
+						"          name,",
+						"          language,",
+						"          mass_per_declared_unit,",
+						"          mass_per_unit_length,",
+						"          category_name = category.name,",
+						"          category_display_name = category.display_name,",
+						"          category_format = category.masterformat,",
+						"          manufacturer_name = manufacturer.name,",
+						"          manufacturer_website = manufacturer.website,",
+						"          manufacturer_country = manufacturer.country,",
+						"          plant_name = plant_or_group.name,",
+						"          plant_country = plant_or_group.country",
+						"     ),",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true) ~> select1",
+						"select1 sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     format: 'parquet',",
+						"     umask: 0022,",
+						"     preCommands: [],",
+						"     postCommands: [],",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true) ~> sink1"
+					]
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/ds_raw_bronze_epd')]",
+				"[concat(variables('factoryId'), '/datasets/ds_cleaned')]",
+				"[concat(variables('factoryId'), '/linkedServices/AzureDataLakeStorage1')]"
+			]
+		}
+	]
+}
